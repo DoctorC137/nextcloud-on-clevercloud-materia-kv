@@ -1,10 +1,13 @@
 ![Clever Cloud logo](github-assets/clever-cloud-logo.png)
 
-# Nextcloud on Clever Cloud
+# Nextcloud on Clever Cloud — no FS Bucket
 [![Clever Cloud - PaaS](https://img.shields.io/badge/Clever%20Cloud-PaaS-orange)](https://clever-cloud.com)
 [![Nextcloud](https://img.shields.io/badge/Nextcloud-33-0082C9?logo=nextcloud)](https://nextcloud.com)
+[![Branch](https://img.shields.io/badge/branch-poc%2Fno--fsbucket-yellow)](https://github.com/DoctorC137/NextCloud-on-CleverCloud/tree/poc/no-fsbucket)
 
-Production-ready deployment of [Nextcloud](https://nextcloud.com) on Clever Cloud. Clever Cloud is an ephemeral PaaS — each deployment or restart starts from a blank VM. This repo adapts Nextcloud to that model: persistent config and data via FS Bucket symlinks, user file storage via Cellar S3 objectstore, and idempotent startup hooks that handle both first install and subsequent restarts.
+> **POC branch** — FS Bucket-free architecture. Config is reconstructed from environment variables on every start. Validated: first install + restart with persistent user data. See `main` for the stable FS Bucket-based version.
+
+Production-ready deployment of [Nextcloud](https://nextcloud.com) on Clever Cloud without a FS Bucket addon. Nextcloud's generated secrets (`instanceid`, `passwordsalt`, `secret`) are stored as Clever Cloud environment variables via the platform API after first install, and `config.php` is fully rebuilt from env vars on every subsequent restart.
 
 ---
 
@@ -15,8 +18,9 @@ Production-ready deployment of [Nextcloud](https://nextcloud.com) on Clever Clou
 | **PHP Application** | Runs Nextcloud (Apache + PHP-FPM) |
 | **PostgreSQL** | Main database |
 | **Redis** | Distributed cache (sessions, locks) |
-| **FS Bucket** | Persists `config/`, `data/`, `custom_apps/`, `themes/`, `logs/` via symlinks |
-| **Cellar S3** | Objectstore for user-uploaded files (`files_primary_s3`) |
+| **Cellar S3** | Objectstore for user-uploaded files + `config.php` secrets stored as env vars |
+
+> No FS Bucket. `config/`, `data/`, `custom_apps/`, `themes/` are local ephemeral directories — user files live on S3, secrets live in env vars.
 
 ---
 
@@ -24,23 +28,27 @@ Production-ready deployment of [Nextcloud](https://nextcloud.com) on Clever Clou
 
 ### Ephemeral local disk
 
-Nextcloud writes its config to `config/config.php` and data to `data/`. Both are lost on every Clever Cloud cycle. A FS Bucket is mounted at `app/storage/` — `run.sh` creates the symlinks before any `occ` call.
+Nextcloud writes its config to `config/config.php` and data to `data/`. Both are lost on every Clever Cloud cycle. Instead of persisting them on a FS Bucket, `run.sh` fully reconstructs `config.php` from environment variables at each startup.
+
+### Secrets persistence
+
+`maintenance:install` generates three secrets — `instanceid`, `passwordsalt`, `secret` — that must remain stable across restarts (sessions, shares, and encryption depend on them). After first install, `run.sh` extracts them from the generated `config.php` and stores them as Clever Cloud env vars via `CC_ENVIRON_UPDATE_URL`. On subsequent starts they are injected automatically and used to rebuild `config.php`.
 
 ### S3 objectstore
 
-The objectstore backend cannot be enabled via `occ` post-install — it must be present in config before the first `maintenance:install`. Cellar credentials are injected via `config-git/20-objectstore.config.php`, which Nextcloud picks up automatically from `config/` using its fragmented config mechanism. All secrets come from Clever Cloud environment variables.
+The objectstore backend must be present in config before the first `maintenance:install` — it cannot be enabled via `occ` post-install. Cellar credentials are injected via `config-git/20-objectstore.config.php`, loaded automatically by Nextcloud from `config/` using its fragmented config mechanism. All secrets come from Clever Cloud environment variables.
 
 ### Idempotent startup
 
-`run.sh` runs on every start (`CC_PRE_RUN_HOOK`). It checks for `config/config.php` on the FS Bucket: absent → full `maintenance:install`; present → `occ upgrade` only. PostgreSQL availability is polled with `SELECT 1` before install (addon may not be immediately reachable on first deploy).
+`run.sh` detects the boot type via env vars: `NC_INSTANCE_ID` absent → first install; present → reconstruct `config.php` and run `occ upgrade`. PostgreSQL availability is polled with `SELECT 1` before install.
 
 ### Skeleton upload
 
-Uploading example files via WebDAV requires Apache running and the S3 objectstore ready — neither holds true during `CC_PRE_RUN_HOOK`. `skeleton.sh` runs via `CC_RUN_SUCCEEDED_HOOK` and calls WebDAV on `localhost:$PORT` (outbound network is restricted in this hook context). A `.skeleton_done` marker on the FS Bucket containing the `instanceid` prevents re-uploads on subsequent restarts.
+Uploading example files via WebDAV requires Apache running and the S3 objectstore ready — neither holds true during `CC_PRE_RUN_HOOK`. `skeleton.sh` runs via `CC_RUN_SUCCEEDED_HOOK` and calls WebDAV on `localhost:$PORT` (outbound network is restricted in this hook context).
 
 ### Background jobs (cron)
 
-Clever Cloud's crontab entries are stored in `/home/bas/.cache/crontab/` — a non-standard path that `crond` does not read. **Webcron mode** is enabled instead: Nextcloud triggers background jobs on each HTTP request. `clevercloud/cron.json` additionally registers a native Clever Cloud cron that curls `/cron.php` every 5 minutes as a fallback.
+Clever Cloud's crontab entries are stored in a non-standard path that `crond` does not read. **Webcron mode** is enabled: Nextcloud triggers background jobs on each HTTP request. `clevercloud/cron.json` additionally registers a native Clever Cloud cron that curls `/cron.php` every 5 minutes as a fallback.
 
 ### Major version migration
 
@@ -60,11 +68,11 @@ Nextcloud blocks version skips across majors. `install.sh` resolves the target v
 │   └── 20-objectstore.config.php      # Cellar S3 objectstore
 ├── scripts/
 │   ├── install.sh                     # CC_POST_BUILD_HOOK — downloads/upgrades Nextcloud
-│   ├── run.sh                         # CC_PRE_RUN_HOOK    — symlinks, install/upgrade
+│   ├── run.sh                         # CC_PRE_RUN_HOOK    — rebuild config.php, install/upgrade
 │   ├── cron.sh                        # Called by cron.json
 │   └── skeleton.sh                    # CC_RUN_SUCCEEDED_HOOK — uploads example files
 ├── deploy/
-│   └── clever-deploy.sh               # Interactive full provisioning script
+│   └── clever-deploy.sh               # Interactive full provisioning script (no FS Bucket)
 └── tools/
     └── clever-destroy.sh              # Full teardown (dev/test only)
 ```
@@ -89,6 +97,7 @@ Click **Use this template → Create a new repository** at the top of this page,
 ```bash
 git clone git@github.com:<you>/nextcloud-on-clevercloud.git
 cd nextcloud-on-clevercloud
+git checkout poc/no-fsbucket
 ```
 
 #### 2. Run the provisioning script
@@ -97,12 +106,12 @@ cd nextcloud-on-clevercloud
 bash deploy/clever-deploy.sh
 ```
 
-The script provisions the PHP app, PostgreSQL, Redis, FS Bucket and Cellar, injects all environment variables, and triggers the deployment. First startup takes **2–5 minutes** (Nextcloud install + DB seed).
+The script provisions the PHP app, PostgreSQL, Redis and Cellar (no FS Bucket), injects all environment variables, and triggers the deployment. First startup takes **2–5 minutes** (Nextcloud install + DB seed + secrets persistence via API).
 
 ### Redeploy
 
 ```bash
-git push origin main
+git push origin poc/no-fsbucket
 # or
 clever deploy --alias nextcloud --force
 ```
