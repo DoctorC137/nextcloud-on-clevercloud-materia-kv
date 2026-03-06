@@ -245,11 +245,13 @@ KV_HOST=$(extract_env "KV_HOST"  "$KV_ENV")
 KV_PORT=$(extract_env "KV_PORT"  "$KV_ENV" | tr -dc '0-9')
 KV_TOKEN=$(extract_env "KV_TOKEN" "$KV_ENV")
 [ -z "$KV_HOST" ] && error "KV_HOST introuvable."
-# On réutilise les variables REDIS_* pour ne pas modifier run.sh
+# On réutilise les variables REDIS_* pour ne pas modifier run.sh.
+# KV_PORT expose le port non-TLS (6378) — on force 6379 (TLS) car run.sh
+# utilise tls:// dans le host. Le port non-TLS est réservé au debug local.
 clever env set --alias "$ALIAS" REDIS_HOST     "$KV_HOST"
-clever env set --alias "$ALIAS" REDIS_PORT     "$KV_PORT"
+clever env set --alias "$ALIAS" REDIS_PORT     "6379"
 clever env set --alias "$ALIAS" REDIS_PASSWORD "$KV_TOKEN"
-success "Materia KV créé (serverless, remplace Redis)"
+success "Materia KV créé (serverless, TLS port 6379)"
 
 # Cellar S3
 CELLAR_ADDON_NAME="${APP_NAME}-cellar"
