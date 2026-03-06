@@ -90,8 +90,18 @@ NC_VERSION_STORED=$(db_get "NC_VERSION")
 
 # --- Generate config.php -----------------------------------------------------
 # Single source of truth. No config-git fragments to avoid Nextcloud merge conflicts.
+# $5 = "no-locking" pour désactiver memcache.locking au premier boot (évite HTTP 423
+# sur WebDAV pendant que skeleton.sh initialise le filesystem via WebDAV).
+# skeleton.sh réactive le locking dès qu'il a terminé (ou en cas d'échec).
 write_config_php() {
-    local instanceid="$1" passwordsalt="$2" secret="$3" version="$4"
+    local instanceid="$1" passwordsalt="$2" secret="$3" version="$4" locking="${5:-enabled}"
+
+    local locking_line
+    if [ "$locking" = "no-locking" ]; then
+        locking_line="  // memcache.locking desactive au premier boot — reactive par skeleton.sh"
+    else
+        locking_line="  'memcache.locking'     => '\\\\OC\\\\Memcache\\\\Redis',"
+    fi
 
     cat > "$REAL_APP/config/config.php" << EOF
 <?php
@@ -132,10 +142,11 @@ write_config_php() {
   'forwarded_for_headers' => ['HTTP_X_FORWARDED_FOR'],
 
   // Cache local : APCu (in-process, zero reseau).
-  // Cache distribue + locking : Materia KV via Redis-compatible TLS.
+  // Cache distribue : Materia KV via Redis-compatible TLS.
+  // locking : desactive au premier boot, reactive par skeleton.sh.
   'memcache.local'       => '\\OC\\Memcache\\APCu',
   'memcache.distributed' => '\\OC\\Memcache\\Redis',
-  'memcache.locking'     => '\\OC\\Memcache\\Redis',
+${locking_line}
   'redis' => [
     'host'       => 'tls://${REDIS_HOST}',
     'port'       => ${REDIS_PORT_CLEAN},
@@ -152,7 +163,7 @@ write_config_php() {
   'maintenance_window_start' => 1,
 ];
 EOF
-    echo "[OK] config.php written."
+    echo "[OK] config.php written (locking=${locking})."
 }
 
 # --- Ensure S3 bucket exists -------------------------------------------------
@@ -242,7 +253,9 @@ else
     db_set "NC_SECRET"        "$NC_SECRET"
     db_set "NC_VERSION"       "$NC_VERSION"
 
-    write_config_php "$NC_INSTANCE_ID" "$NC_PASSWORD_SALT" "$NC_SECRET" "$NC_VERSION"
+    # Premier boot : locking désactivé pour éviter HTTP 423 sur WebDAV pendant
+    # que skeleton.sh initialise le filesystem. skeleton.sh le réactive ensuite.
+    write_config_php "$NC_INSTANCE_ID" "$NC_PASSWORD_SALT" "$NC_SECRET" "$NC_VERSION" "no-locking"
     ensure_s3_bucket
 
     # occ upgrade necessaire au premier boot : config.php a ete recrit avec la
@@ -258,17 +271,21 @@ fi
 php "$REAL_APP/occ" config:app:set core backgroundjobs_mode --value=webcron --no-interaction 2>/dev/null || true
 php "$REAL_APP/occ" maintenance:mode --off --no-interaction 2>/dev/null || true
 
-# --- Purge DAV locks orphelins -----------------------------------------------
-# Materia KV conserve les locks entre redemarrages (contrairement a Redis
-# classique ephemere). Les locks Redis ne sont PAS dans oc_file_locks (PG) —
-# DELETE 0 confirme que la table PG est vide. La purge doit cibler Materia KV.
-# FLUSHDB est sur au boot : Apache n'a pas encore demarre, aucune session active.
-php "$REAL_APP/occ" dav:cleanup-chunks --no-interaction 2>/dev/null || true
-echo "[INFO] Purge des locks orphelins dans Materia KV (FLUSHDB)..."
-redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT_CLEAN" --tls \
-    -a "$REDIS_PASSWORD" --no-auth-warning FLUSHDB \
-    && echo "[OK] Materia KV purgé." \
-    || echo "[WARN] FLUSHDB échoué (non bloquant)."
+# --- Purge DAV locks orphelins (boots suivants) ------------------------------
+# Au premier boot, memcache.locking est desactive — pas de locks Redis a purger.
+# Aux boots suivants, Materia KV conserve les locks entre redemarrages :
+# FLUSHDB au boot est sur car Apache n'a pas encore demarre.
+NC_SKELETON_DONE=$(db_get "NC_SKELETON_UPLOADED" 2>/dev/null | tr -d '[:space:]')
+if [ "$NC_SKELETON_DONE" = "1" ]; then
+    php "$REAL_APP/occ" dav:cleanup-chunks --no-interaction 2>/dev/null || true
+    echo "[INFO] Purge des locks orphelins dans Materia KV (FLUSHDB)..."
+    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT_CLEAN" --tls \
+        -a "$REDIS_PASSWORD" --no-auth-warning FLUSHDB \
+        && echo "[OK] Materia KV purgé." \
+        || echo "[WARN] FLUSHDB échoué (non bloquant)."
+else
+    echo "[INFO] Premier boot — memcache.locking désactivé, pas de FLUSHDB nécessaire."
+fi
 echo "[OK] DAV locks purged."
 
 echo "[OK] Nextcloud ready: https://$NEXTCLOUD_DOMAIN"

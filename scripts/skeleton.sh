@@ -37,11 +37,6 @@ fi
 # -----------------------------------------------------------------------------
 # Paramètres WebDAV
 # -----------------------------------------------------------------------------
-REAL_APP=$(ls -d /home/bas/app_*/ 2>/dev/null | head -1 | sed 's|/$||')
-if [ -z "$REAL_APP" ]; then
-    echo "[ERR] Impossible de localiser le dossier de l'application." && exit 1
-fi
-
 SKELETON_DIR="$REAL_APP/core/skeleton"
 if [ ! -d "$SKELETON_DIR" ]; then
     echo "[WARN] Dossier skeleton introuvable ($SKELETON_DIR), rien à uploader."
@@ -52,6 +47,25 @@ NC_PORT="${PORT:-8080}"
 NC_LOCAL="http://localhost:$NC_PORT/remote.php/dav/files/$NEXTCLOUD_ADMIN_USER"
 NC_AUTH="$NEXTCLOUD_ADMIN_USER:$NEXTCLOUD_ADMIN_PASSWORD"
 NC_HOST_HEADER="Host: $NEXTCLOUD_DOMAIN"
+
+# -----------------------------------------------------------------------------
+# Helper : réactive memcache.locking dans config.php via occ
+# Appelé en fin de script (succès ou échec) pour s'assurer que le locking
+# est toujours réactivé, même si skeleton.sh échoue.
+# -----------------------------------------------------------------------------
+REAL_APP=$(ls -d /home/bas/app_*/ 2>/dev/null | head -1 | sed 's|/$||')
+if [ -z "$REAL_APP" ]; then
+    echo "[ERR] Impossible de localiser le dossier de l'application." && exit 1
+fi
+
+enable_locking() {
+    echo "[INFO] Réactivation de memcache.locking dans config.php..."
+    php "$REAL_APP/occ" config:system:set memcache.locking \
+        --value='\OC\Memcache\Redis' --type=string --no-interaction 2>/dev/null \
+        && echo "[OK] memcache.locking réactivé." \
+        || echo "[WARN] Impossible de réactiver memcache.locking via occ."
+}
+trap enable_locking EXIT
 
 # -----------------------------------------------------------------------------
 # ÉTAPE 1 — Vérification directe que Cellar répond (HEAD sur le bucket)
