@@ -278,7 +278,12 @@ else
     NC_INSTANCE_ID=$(extract_secret "instanceid")
     NC_PASSWORD_SALT=$(extract_secret "passwordsalt")
     NC_SECRET=$(extract_secret "secret")
-    NC_VERSION_INSTALLED=$(extract_secret "version")
+    # Utiliser occ status pour avoir la version à 4 chiffres (ex: 33.0.0.16)
+    # car config.php généré par occ maintenance:install ne contient que 3 chiffres (ex: 33.0.0)
+    # ce qui provoquerait un occ upgrade inutile à chaque redémarrage
+    NC_VERSION_INSTALLED=$(php "$REAL_APP/occ" status --output=json 2>/dev/null \
+        | grep -oE '"versionstring":"[^"]*"' | cut -d'"' -f4 || true)
+    [ -z "$NC_VERSION_INSTALLED" ] && NC_VERSION_INSTALLED=$(extract_secret "version")
 
     # Validation stricte : si un secret est vide, on s'arrête avec un message clair
     if [ -z "$NC_INSTANCE_ID" ] || [ -z "$NC_PASSWORD_SALT" ] || [ -z "$NC_SECRET" ]; then
