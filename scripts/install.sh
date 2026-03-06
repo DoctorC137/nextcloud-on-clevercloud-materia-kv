@@ -5,10 +5,12 @@
 set -e
 
 major_version() { echo "$1" | cut -d. -f1; }
+
 latest_in_major() {
     local major="$1"
     curl -s "https://download.nextcloud.com/server/releases/" | grep -oP "nextcloud-${major}\.[0-9]+\.[0-9]+\.zip" | grep -v "beta\|rc\|RC" | sed 's/nextcloud-//;s/\.zip//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1
 }
+
 apply_version() {
     local version="$1"
     echo "[INFO] Application de Nextcloud $version..."
@@ -35,7 +37,8 @@ fi
 
 if[ -z "$NEXTCLOUD_VERSION" ]; then
     echo "[INFO] Récupération de la dernière version stable..."
-    NC_TARGET=$(curl -s "https://api.github.com/repos/nextcloud/server/releases/latest" | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')[ -z "$NC_TARGET" ] && NC_TARGET="33.0.0"
+    NC_TARGET=$(curl -s "https://api.github.com/repos/nextcloud/server/releases/latest" | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+    [ -z "$NC_TARGET" ] && NC_TARGET="33.0.0"
 else
     NC_TARGET="$NEXTCLOUD_VERSION"
 fi
@@ -50,13 +53,14 @@ if [ -z "$NC_CURRENT" ]; then
 else
     MAJOR_CURRENT=$(major_version "$NC_CURRENT")
     MAJOR_TARGET=$(major_version "$NC_TARGET")
-    if[ "$MAJOR_CURRENT" -eq "$MAJOR_TARGET" ]; then
+    
+    if [ "$MAJOR_CURRENT" -eq "$MAJOR_TARGET" ]; then
         apply_version "$NC_TARGET"
-    elif [ "$MAJOR_TARGET" -lt "$MAJOR_CURRENT" ]; then
+    elif[ "$MAJOR_TARGET" -lt "$MAJOR_CURRENT" ]; then
         echo "[ERR] Downgrade interdit." && exit 1
     else
         STEP=$MAJOR_CURRENT
-        while[ "$STEP" -lt "$MAJOR_TARGET" ]; do
+        while [ "$STEP" -lt "$MAJOR_TARGET" ]; do
             NEXT=$((STEP + 1))
             STEP_VERSION=$(latest_in_major "$NEXT")
             echo "[INFO] Étape intermédiaire : → $STEP_VERSION"

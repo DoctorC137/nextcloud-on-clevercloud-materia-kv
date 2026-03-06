@@ -41,8 +41,7 @@ PG_READY=0
 for i in $(seq 1 30); do
     if db_query "SELECT 1;" | grep -q 1; then PG_READY=1; break; fi
     sleep 3
-done
-[ "$PG_READY" = "0" ] && echo "[ERR] Timeout PostgreSQL." && exit 1
+done[ "$PG_READY" = "0" ] && echo "[ERR] Timeout PostgreSQL." && exit 1
 
 db_query "CREATE TABLE IF NOT EXISTS cc_nextcloud_secrets (key VARCHAR(255) PRIMARY KEY, value TEXT);"
 
@@ -98,7 +97,9 @@ else
     NC_INSTANCE_ID=$(extract_nc_config "instanceid")
     NC_PASSWORD_SALT=$(extract_nc_config "passwordsalt")
     NC_SECRET=$(extract_nc_config "secret")
-    NC_VERSION_INSTALLED=$(extract_nc_config "version" | cut -d. -f1-3)[ -z "$NC_INSTANCE_ID" ] && echo "[ERR] Impossible d'extraire les secrets." && exit 1
+    NC_VERSION_INSTALLED=$(extract_nc_config "version" | cut -d. -f1-3)
+    
+    [ -z "$NC_INSTANCE_ID" ] && echo "[ERR] Impossible d'extraire les secrets." && exit 1
 
     echo "[INFO] Sauvegarde des secrets en BDD..."
     db_set_secret "NC_INSTANCE_ID" "$NC_INSTANCE_ID"
