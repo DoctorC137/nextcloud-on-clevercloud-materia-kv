@@ -56,23 +56,19 @@ db_set() {
 }
 
 # --- Wait for PostgreSQL -----------------------------------------------------
-# SELECT 1 peut passer alors que le serveur n'est pas encore prêt pour DDL.
-# On vérifie que pg_is_in_recovery() retourne 'f' (primary prêt) et qu'une
-# transaction DDL simple fonctionne avant de lancer occ maintenance:install.
-echo "[INFO] Waiting for PostgreSQL..."
+# Clever Cloud place un proxy (Pgpool-II) devant PostgreSQL.
+# On valide avec un DDL leger (CREATE+DROP TABLE) plutot que SELECT 1,
+# car SELECT 1 peut passer alors que le proxy n'est pas encore DDL-ready.
+echo "[INFO] Waiting for PostgreSQL DDL-ready..."
 PG_READY=0
 for i in $(seq 1 40); do
-    RESULT=$(db_query "SELECT pg_is_in_recovery();" 2>/dev/null | tr -d '[:space:]')
-    if [ "$RESULT" = "f" ]; then
-        # Vérifier aussi qu'on peut écrire (DDL simple)
-        TEST=$(db_query "CREATE TABLE IF NOT EXISTS _pg_ready_check (id int); DROP TABLE IF EXISTS _pg_ready_check;" 2>/dev/null && echo "ok")
-        if [ "$TEST" = "ok" ]; then
-            echo "[OK] PostgreSQL ready for DDL (attempt $i)."
-            PG_READY=1
-            break
-        fi
+    DDL_RESULT=$(db_query "DROP TABLE IF EXISTS _pg_ready_check; CREATE TABLE _pg_ready_check (id int); DROP TABLE _pg_ready_check;" 2>&1)
+    if [ $? -eq 0 ] && [ -z "$(echo "$DDL_RESULT" | grep -i error)" ]; then
+        echo "[OK] PostgreSQL DDL-ready (attempt $i)."
+        PG_READY=1
+        break
     fi
-    echo "[INFO] PostgreSQL not ready yet (attempt $i, result='$RESULT'), waiting..."
+    echo "[INFO] PostgreSQL not DDL-ready yet (attempt $i): $(echo "$DDL_RESULT" | tail -1 | cut -c1-80)"
     sleep 5
 done
 [ "$PG_READY" = "0" ] && echo "[ERR] PostgreSQL timeout after 200s." && exit 1
@@ -198,8 +194,8 @@ if [ -n "$NC_INSTANCE_ID" ] && [ -n "$NC_PASSWORD_SALT" ] && [ -n "$NC_SECRET" ]
 else
 
     echo "[INFO] No secrets found — running first install."
-    # Retry sur l'install : le serveur PostgreSQL peut couper la connexion
-    # juste après le polling (addon encore en init sur Clever Cloud).
+    # Retry : le proxy Clever Cloud peut couper la connexion pendant l'install
+    # meme apres un DDL check reussi (race condition d'initialisation).
     INSTALL_OK=0
     for attempt in 1 2 3; do
         echo "[INFO] occ maintenance:install — attempt $attempt/3..."
@@ -216,8 +212,8 @@ else
             INSTALL_OK=1
             break
         fi
-        echo "[WARN] Install attempt $attempt failed, waiting 15s before retry..."
-        sleep 15
+        echo "[WARN] Install attempt $attempt failed, waiting 20s before retry..."
+        sleep 20
     done
     [ "$INSTALL_OK" = "0" ] && echo "[ERR] occ maintenance:install failed after 3 attempts." && exit 1
 
