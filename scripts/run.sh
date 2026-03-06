@@ -75,8 +75,19 @@ cc_env_set() {
 }
 
 # -----------------------------------------------------------------------------
+# Helper : extraire une clé de config.php (qui définit $CONFIG, pas $c)
+# -----------------------------------------------------------------------------
+extract_nc_config() {
+    local KEY="$1"
+    php -r "
+        \$CONFIG = [];
+        include '${REAL_APP}/config/config.php';
+        echo \$CONFIG['${KEY}'] ?? '';
+    " 2>/dev/null
+}
+
+# -----------------------------------------------------------------------------
 # Détection : premier démarrage ou redémarrage
-# Les secrets sont absents au premier démarrage, présents ensuite.
 # -----------------------------------------------------------------------------
 if [ -n "$NC_INSTANCE_ID" ] && [ -n "$NC_PASSWORD_SALT" ] && [ -n "$NC_SECRET" ]; then
     # -------------------------------------------------------------------------
@@ -144,23 +155,21 @@ else
         --no-interaction
 
     # -------------------------------------------------------------------------
-    # Extraction des secrets générés par Nextcloud
+    # Extraction des secrets générés par Nextcloud depuis config.php
+    # config.php définit $CONFIG (pas $c) — utiliser extract_nc_config()
     # -------------------------------------------------------------------------
-    NC_INSTANCE_ID=$(php -r "
-        \$c = include '$REAL_APP/config/config.php';
-        echo \$c['instanceid'] ?? '';
-    ")
-    NC_PASSWORD_SALT=$(php -r "
-        \$c = include '$REAL_APP/config/config.php';
-        echo \$c['passwordsalt'] ?? '';
-    ")
-    NC_SECRET=$(php -r "
-        \$c = include '$REAL_APP/config/config.php';
-        echo \$c['secret'] ?? '';
-    ")
+    NC_INSTANCE_ID=$(extract_nc_config "instanceid")
+    NC_PASSWORD_SALT=$(extract_nc_config "passwordsalt")
+    NC_SECRET=$(extract_nc_config "secret")
+
+    echo "[DEBUG] instanceid='$NC_INSTANCE_ID'"
+    echo "[DEBUG] passwordsalt length=${#NC_PASSWORD_SALT}"
+    echo "[DEBUG] secret length=${#NC_SECRET}"
 
     if [ -z "$NC_INSTANCE_ID" ] || [ -z "$NC_PASSWORD_SALT" ] || [ -z "$NC_SECRET" ]; then
         echo "[ERR] Impossible d'extraire les secrets depuis config.php."
+        echo "[ERR] Contenu config.php :"
+        cat "$REAL_APP/config/config.php" || echo "[ERR] config.php introuvable"
         exit 1
     fi
 
