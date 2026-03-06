@@ -269,18 +269,6 @@ clever env set --alias "$ALIAS" REDIS_PORT     "$REDIS_PORT_VAL"
 clever env set --alias "$ALIAS" REDIS_PASSWORD "$REDIS_PASS_VAL"
 success "Redis créé ($REDIS_PLAN)"
 
-# FS Bucket
-FS_ADDON_NAME="${APP_NAME}-fsbucket"
-FS_OUT=$(clever addon create fs-bucket --plan s --region "$REGION" \
-    $ORG_FLAG --link "$ALIAS" "$FS_ADDON_NAME" --yes 2>&1)
-FS_ADDON_ID=$(echo "$FS_OUT" | grep "^ID:" | awk '{print $2}' | head -n1)
-[ -z "$FS_ADDON_ID" ] && error "Impossible d'extraire l'ID FS Bucket."
-FS_ENV=$(clever addon env "$FS_ADDON_ID" $ORG_FLAG --format shell 2>&1)
-FS_BUCKET_HOST=$(extract_env "BUCKET_HOST" "$FS_ENV")
-[ -z "$FS_BUCKET_HOST" ] && error "BUCKET_HOST introuvable."
-clever env set --alias "$ALIAS" CC_FS_BUCKET "app/storage:${FS_BUCKET_HOST}"
-success "FS Bucket créé (persistance config + logs)"
-
 # Cellar S3
 CELLAR_ADDON_NAME="${APP_NAME}-cellar"
 CELLAR_OUT=$(clever addon create cellar-addon --plan s --region "$REGION" \
