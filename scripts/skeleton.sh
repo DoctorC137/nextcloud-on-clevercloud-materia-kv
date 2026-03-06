@@ -54,17 +54,48 @@ NC_AUTH="$NEXTCLOUD_ADMIN_USER:$NEXTCLOUD_ADMIN_PASSWORD"
 NC_HOST_HEADER="Host: $NEXTCLOUD_DOMAIN"
 
 # -----------------------------------------------------------------------------
-# Attente que l'objectstore S3 soit opérationnel via WebDAV
-# On tente un PUT de test — 201 (créé) ou 204 (déjà là) signifient que ça marche
+# ÉTAPE 1 — Vérification directe que Cellar (S3) est joignable
+# On tente un HEAD sur le bucket avant même de toucher WebDAV.
+# Cellar renvoie 200/403/404 quand il répond ; toute réponse non-5xx est OK.
+# Cela évite de bombarder Nextcloud avec des PUT alors que le backend S3
+# n'est pas encore prêt (ce qui provoque des 503 côté Nextcloud).
 # -----------------------------------------------------------------------------
-echo "[INFO] Attente de l'objectstore S3 via WebDAV..."
+echo "[INFO] Vérification directe de Cellar S3..."
+S3_ENDPOINT="https://${CELLAR_ADDON_HOST}/${CELLAR_BUCKET_NAME}"
+CELLAR_READY=0
+for i in $(seq 1 24); do
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 10 \
+        -X HEAD "$S3_ENDPOINT" 2>/dev/null)
+    # Toute réponse HTTP non-5xx indique que Cellar répond
+    if [ -n "$HTTP" ] && [ "$HTTP" != "000" ] && [ "${HTTP:0:1}" != "5" ]; then
+        echo "[OK] Cellar S3 joignable (HTTP $HTTP) après $i tentative(s)."
+        CELLAR_READY=1
+        break
+    fi
+    echo "[INFO] Attente Cellar S3... tentative $i/24 (HTTP $HTTP)"
+    sleep 5
+done
+
+if [ "$CELLAR_READY" = "0" ]; then
+    echo "[ERR] Timeout — Cellar S3 non joignable après 2 minutes. Abandon."
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# ÉTAPE 2 — Attente que Nextcloud serve correctement le WebDAV
+# (l'objectstore autocreate peut prendre quelques secondes supplémentaires
+# la toute première fois que Nextcloud l'initialise)
+# On tente un PUT de test — 201 (créé) ou 204 (déjà là) signifient succès.
+# -----------------------------------------------------------------------------
+echo "[INFO] Attente de l'objectstore S3 via WebDAV Nextcloud..."
 READY=0
-for i in $(seq 1 60); do
+for i in $(seq 1 24); do
     HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
         -u "$NC_AUTH" \
         -H "$NC_HOST_HEADER" \
         -X PUT --data-binary "ready" \
-        --max-time 10 \
+        --max-time 15 \
         "$NC_LOCAL/.skeleton_check" 2>/dev/null)
     if [ "$HTTP" = "201" ] || [ "$HTTP" = "204" ]; then
         curl -s -X DELETE -u "$NC_AUTH" -H "$NC_HOST_HEADER" \
@@ -73,12 +104,13 @@ for i in $(seq 1 60); do
         echo "[OK] ObjectStore prêt après $i tentative(s)."
         break
     fi
-    echo "[INFO] Attente S3... tentative $i/60 (HTTP $HTTP)"
+    echo "[INFO] Attente WebDAV... tentative $i/24 (HTTP $HTTP)"
     sleep 5
 done
 
 if [ "$READY" = "0" ]; then
-    echo "[ERR] Timeout — objectstore S3 non disponible après 5 minutes."
+    echo "[ERR] Timeout — WebDAV Nextcloud non fonctionnel après 2 minutes."
+    echo "[ERR] Vérifiez les logs Nextcloud pour des erreurs S3/objectstore."
     exit 1
 fi
 
