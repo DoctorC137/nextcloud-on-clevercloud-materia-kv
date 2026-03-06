@@ -35,6 +35,9 @@ echo "[INFO] REAL_APP=$REAL_APP"
 # -----------------------------------------------------------------------------
 mkdir -p "$REAL_APP/config" "$REAL_APP/data" "$REAL_APP/custom_apps" "$REAL_APP/themes"
 
+# .ncdata est requis par occ — recréé à chaque démarrage car data/ est éphémère
+echo "# Nextcloud data directory" > "$REAL_APP/data/.ncdata"
+
 # On vide config/ pour éviter tout conflit avec d'anciens fragments
 rm -f "$REAL_APP/config/"*.php 2>/dev/null || true
 
