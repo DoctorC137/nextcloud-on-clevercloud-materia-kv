@@ -172,10 +172,8 @@ write_config_php() {
   'allow_local_remote_servers' => true,
 
   // Logs vers syslog (visible via clever logs)
-  // TEMPORAIRE : loglevel=0 (debug) pour diagnostiquer les 503 WebDAV
-  // Repasser à 2 une fois le problème résolu.
   'log_type' => 'syslog',
-  'loglevel'  => 0,
+  'loglevel'  => 2,
 
   // Divers
   'default_phone_region'    => 'FR',
