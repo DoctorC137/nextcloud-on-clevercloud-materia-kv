@@ -95,8 +95,6 @@ Click **Use this template → Create a new repository** at the top of this page,
 
 ```bash
 git clone git@github.com:<you>/nextcloud-on-clevercloud.git
-cd nextcloud-on-clevercloud
-git checkout poc/no-fsbucket
 ```
 
 #### 2. Run the provisioning script
