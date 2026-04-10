@@ -161,6 +161,9 @@ ${locking_line}
   'loglevel'                 => 2,
   'default_phone_region'     => 'FR',
   'maintenance_window_start' => 1,
+
+  // Désactive l'updater web — les mises à jour passent par install.sh + clever deploy.
+  'upgrade.disable-web' => true,
 ];
 EOF
     echo "[OK] config.php written (locking=${locking})."
@@ -199,7 +202,7 @@ if [ -n "$NC_INSTANCE_ID" ] && [ -n "$NC_PASSWORD_SALT" ] && [ -n "$NC_SECRET" ]
     php "$REAL_APP/occ" db:add-missing-indices --no-interaction 2>/dev/null || true
 
     NC_VERSION_NEW=$(php "$REAL_APP/occ" status --output=json 2>/dev/null \
-        | grep -oE '"versionstring":"[^"]*"' | cut -d'"' -f4 || true)
+        | grep -oE '"version":"[^"]*"' | cut -d'"' -f4 || true)
     if [ -n "$NC_VERSION_NEW" ] && [ "$NC_VERSION_NEW" != "$NC_VERSION" ]; then
         echo "[INFO] Version updated: $NC_VERSION → $NC_VERSION_NEW"
         db_set "NC_VERSION" "$NC_VERSION_NEW"

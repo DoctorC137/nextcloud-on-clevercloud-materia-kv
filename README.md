@@ -82,22 +82,21 @@ Nextcloud blocks version skips across majors. `install.sh` resolves the target v
 
 ### Prerequisites
 
+Install clever-tools and log in to Clever Cloud:
+
 ```bash
 npm install -g clever-tools
 clever login
 ```
 
-### First deployment
-
-#### 1. Create your repo from this template
-
-Click **Use this template → Create a new repository** at the top of this page, then clone your new repo:
+Then create your own copy of this repo: click **Use this template → Create a new repository** at the top of this page, and clone it locally:
 
 ```bash
 git clone git@github.com:<you>/nextcloud-on-clevercloud.git
+cd nextcloud-on-clevercloud
 ```
 
-#### 2. Run the provisioning script
+### First deployment
 
 ```bash
 bash deploy/clever-deploy.sh
